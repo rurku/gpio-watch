@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <curl/curl.h>
 
 // resources
 // http://linux-sunxi.org/GPIO
@@ -20,6 +21,11 @@ void export(int port)
 	FILE* f;
 	char buf[10];
 	f = fopen("/sys/class/gpio/export", "w");
+    if (f == NULL)
+    {
+        printf("Failed to open export file");
+        exit(1);
+    }
 	snprintf(buf, 10, "%d", port);
 	fputs("21", f);
 	fclose(f);
@@ -30,6 +36,11 @@ void unexport(int port)
 	FILE* f;
 	char buf[10];
 	f = fopen("/sys/class/gpio/unexport", "w");
+    if (f == NULL)
+    {
+        printf("Failed to open unexport file");
+        exit(1);
+    }
 	snprintf(buf, 10, "%d", port);
 	fputs("21", f);
 	fclose(f);
@@ -41,6 +52,11 @@ void set_direction(int port, char* direction)
 	FILE* f;
 	snprintf(buf, 100, "/sys/class/gpio/gpio%d/direction", port);
 	f = fopen(buf, "w");
+    if (f == NULL)
+    {
+        printf("Failed to open direction file");
+        exit(1);
+    }
 	fputs(direction, f);
 	fclose(f);
 }
@@ -51,6 +67,11 @@ void set_edge(int port, char* edge)
 	FILE* f;
 	snprintf(buf, 100, "/sys/class/gpio/gpio%d/edge", port);
 	f = fopen(buf, "w");
+    if (f == NULL)
+    {
+        printf("Failed to open edge file");
+        exit(1);
+    }
 	fputs(edge, f);
 	fclose(f);
 }
@@ -73,14 +94,29 @@ int wait_for_edge(int file, int timeout_ms, char* value, struct timespec* timest
 
 int open_port(int port)
 {
+    int ret;
 	char buf[100];
 	snprintf(buf, 100, "/sys/class/gpio/gpio%d/value", port);
-	return open(buf, O_RDONLY);
+	ret = open(buf, O_RDONLY);
+    if (ret == -1)
+    {
+        printf("Failed to open value file");
+        exit(1);
+    }
+    return ret;
 }
 
+// Max 1 second. If more then returns -1;
 long time_diff(struct timespec* from, struct timespec* to)
 {
-	return ((*to).tv_sec - (*from).tv_sec) * 1000000000 + (*to).tv_nsec - (*from).tv_nsec;
+    long secDiff, totalDiff;
+    secDiff = (*to).tv_sec - (*from).tv_sec;
+    if (secDiff > 1)
+        return -1;
+    totalDiff = ((*to).tv_sec - (*from).tv_sec) * 1000000000 + (*to).tv_nsec - (*from).tv_nsec;
+    if (totalDiff > 1000000000)
+        return -1;
+    return totalDiff;
 }
 
 volatile sig_atomic_t terminated = 0;
@@ -97,7 +133,7 @@ struct analysis_context
 	long preamble_width;
 	long bit_width;
 	int bitcount;
-	char buffer[40];
+	char buffer[100];
 };
 
 void print_temp(struct analysis_context* context)
@@ -123,11 +159,16 @@ void print_temp(struct analysis_context* context)
 
 bool is_within_margin(long a, long b)
 {
+    // if shorter than 200 then return false because it's too short to reliably measure
+    if (a < 1000 || b < 1000)
+        return false;
 	return abs(a - b) / (double)a < 0.1;
 }
 
-void analyze(struct analysis_context* context, char value, long width)
+bool analyze(struct analysis_context* context, char value, long width)
 {
+    bool ret = false;
+
 	if (context->preamble_count < 8)
 	{
 		if (context->preamble_count % 2 == value - '0' && (context->preamble_count == 0 || is_within_margin(context->last_width, width)))
@@ -137,7 +178,7 @@ void analyze(struct analysis_context* context, char value, long width)
 			if (context->preamble_count == 8)
 			{
 				context->bit_width = context->preamble_width / 8;
-				printf("%ld ", time(NULL));
+                context->bitcount = 0;
 			}
 		}
 		else if (value == '0')
@@ -150,40 +191,42 @@ void analyze(struct analysis_context* context, char value, long width)
 			context->preamble_count = 0;
 			context->preamble_width = 0;
 		}
-		//printf("%c%d %ld\n", value == '0' ? 'H' : 'L', context->preamble_count, width);
 	}
 	else if (value == '1') // if it's after preamble then we analyze bits at the rising edge
 	{
-		//printf("bitwidth: %ld, last: %ld, width: %ld\n", context->bit_width, context->last_width, width);
 		if (is_within_margin(context->bit_width, context->last_width + width))
 		{
-			putchar(context->last_width > width ? '1' : '0');
-			if (context->bitcount < 40)
+			if (context->bitcount < sizeof(context->buffer))
 			{
 				context->buffer[context->bitcount] = context->last_width > width ? 1 : 0;
 				context->bitcount++;
-//				if (context->bitcount == 10 || context->bitcount == 12 || context->bitcount == 18)
-//					putchar(' ');
 			}
+            else
+            {
+                // we've filled the buffer and there's more being transmitted. Discard and reset for next transmission.
+                context->preamble_count = 0;
+                context->preamble_width = 0;
+            }
 		}
 		else
 		{
+            // Transmission ended. If we captured at least 1 bit then indicate that it's ready
 			context->preamble_count = 0;
 			context->preamble_width = 0;
-			putchar('\n');
-			print_temp(context);
-			context->bitcount = 0;
+            if (context->bitcount > 0)
+                ret = true;
 		}
 	}
 
 	context->last_width = width;
+
+    return ret;
 }
 
-
-
-int main(void)
+// if return value = true then *temp is temperature in tenth's of degrees. e.g. 21.5 degrees = 215.
+bool await_transmission(int channel, int gpio_port, int* temp)
 {
-	int f;
+    int f;
 	char value;
 	struct timespec timestamp;
 	struct timespec old_timestamp;
@@ -191,7 +234,70 @@ int main(void)
 	long diff;
 	int last_wait_ret = 0;
 	struct analysis_context analysis_context;
+    bool ret = false;
+    int i;
 
+	memset(&analysis_context, 0, sizeof(struct analysis_context));
+
+    export(gpio_port);
+	set_direction(gpio_port, "in");
+	set_edge(gpio_port, "both");
+	f = open_port(gpio_port);
+	read(f, &value, 1);
+	while (terminated == 0 && (last_wait_ret = wait_for_edge(f, 100, &value, &timestamp)) >= 0)
+	{
+		if (last_wait_ret == 0)
+        {
+            memset(&analysis_context, 0, sizeof(struct analysis_context));
+            continue;
+        }
+
+		if (started)
+		{
+			diff = time_diff(&old_timestamp, &timestamp);
+            
+			if (analyze(&analysis_context, value, diff))
+            {
+                // we have a completed transmission.
+                if (analysis_context.bitcount == 36)
+                {
+                    if (channel == 2*analysis_context.buffer[10] + analysis_context.buffer[11])
+                    {
+                        *temp = 0;
+                        for (i = 12; i <= 23; i++)
+                        {
+                            *temp <<= 1;
+                            *temp += analysis_context.buffer[i];
+                        }
+                        if (analysis_context.buffer[12] == 1)
+                        {
+                            // negative value
+                            *temp |= 0xfffff000;
+                        }
+                        *temp -= 500; // offset from -50 degrees celcius
+                        ret = true;
+                        break;
+                    }
+                }
+
+            }
+		}
+		old_timestamp = timestamp;
+		started = true;
+	}
+	
+	if (last_wait_ret < 0)
+		fprintf(stderr, "poll returned negative value %d\n", last_wait_ret);
+
+	close(f);
+	unexport(gpio_port);
+
+    return ret;
+}
+
+int main(void)
+{
+    int temperature;
 	struct sigaction action;
 
 	memset(&action, 0, sizeof(struct sigaction));
@@ -199,32 +305,13 @@ int main(void)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	memset(&analysis_context, 0, sizeof(struct analysis_context));
-
-        export(21);
-	set_direction(21, "in");
-	set_edge(21, "both");
-	f = open_port(21);
-	read(f, &value, 1);
-	while (terminated == 0 && (last_wait_ret = wait_for_edge(f, 100, &value, &timestamp)) >= 0)
-	{
-		if (last_wait_ret == 0) continue;
-
-		if (started)
-		{
-			diff = time_diff(&old_timestamp, &timestamp);
-			analyze(&analysis_context, value, diff);
-                        //printf("%c %ld sec:%ld nsec:%ld\n", value, diff, timestamp.tv_sec, timestamp.tv_nsec);
-		}
-		old_timestamp = timestamp;
-		started = true;
-	}
-	
-	if (last_wait_ret < 0)
-		fprintf(stderr, "poll returned negativ value %d\n", last_wait_ret);
-
-	close(f);
-	unexport(21);
-	printf("cleaned up");
+    while (terminated == 0)
+    {
+        if (await_transmission(1, 21, &temperature))
+        {
+            printf("%ld %f\n", time(NULL), temperature/(double)10);
+            sleep(1);
+        }
+    }
 }
 
