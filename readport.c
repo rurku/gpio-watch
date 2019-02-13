@@ -23,7 +23,7 @@ void export(int port)
 	f = fopen("/sys/class/gpio/export", "w");
     if (f == NULL)
     {
-        printf("Failed to open export file");
+        fprintf(stderr, "Failed to open export file\n");
         exit(1);
     }
 	snprintf(buf, 10, "%d", port);
@@ -38,7 +38,7 @@ void unexport(int port)
 	f = fopen("/sys/class/gpio/unexport", "w");
     if (f == NULL)
     {
-        printf("Failed to open unexport file");
+        fprintf(stderr, "Failed to open unexport file\n");
         exit(1);
     }
 	snprintf(buf, 10, "%d", port);
@@ -54,7 +54,7 @@ void set_direction(int port, char* direction)
 	f = fopen(buf, "w");
     if (f == NULL)
     {
-        printf("Failed to open direction file");
+        fprintf(stderr, "Failed to open direction file");
         exit(1);
     }
 	fputs(direction, f);
@@ -69,7 +69,7 @@ void set_edge(int port, char* edge)
 	f = fopen(buf, "w");
     if (f == NULL)
     {
-        printf("Failed to open edge file");
+        fprintf(stderr, "Failed to open edge file\n");
         exit(1);
     }
 	fputs(edge, f);
@@ -100,7 +100,7 @@ int open_port(int port)
 	ret = open(buf, O_RDONLY);
     if (ret == -1)
     {
-        printf("Failed to open value file");
+        fprintf(stderr, "Failed to open value file\n");
         exit(1);
     }
     return ret;
@@ -133,29 +133,28 @@ struct analysis_context
 	long preamble_width;
 	long bit_width;
 	int bitcount;
-	char buffer[100];
 };
 
-void print_temp(struct analysis_context* context)
-{
-	int whole = 0;
-	int i;
-	if (context->bitcount == 36)
-	{
-		for (i = 12; i <= 23; i++)
-		{
-			whole <<= 1;
-			whole += context->buffer[i];
-		}
-		if (context->buffer[12] == 1)
-		{
-			// negative value
-			whole |= 0xfffff000;
-		}
+// void print_temp(struct analysis_context* context)
+// {
+// 	int whole = 0;
+// 	int i;
+// 	if (context->bitcount == 36)
+// 	{
+// 		for (i = 12; i <= 23; i++)
+// 		{
+// 			whole <<= 1;
+// 			whole += context->buffer[i];
+// 		}
+// 		if (context->buffer[12] == 1)
+// 		{
+// 			// negative value
+// 			whole |= 0xfffff000;
+// 		}
 
-		printf("%f\n", -50 + (double)whole/10);
-	}
-}
+// 		printf("%f\n", -50 + (double)whole/10);
+// 	}
+// }
 
 bool is_within_margin(long a, long b)
 {
@@ -165,7 +164,7 @@ bool is_within_margin(long a, long b)
 	return abs(a - b) / (double)a < 0.1;
 }
 
-bool analyze(struct analysis_context* context, char value, long width)
+bool analyze(struct analysis_context* context, char value, long width, char* buffer, int buffer_size)
 {
     bool ret = false;
 
@@ -196,9 +195,9 @@ bool analyze(struct analysis_context* context, char value, long width)
 	{
 		if (is_within_margin(context->bit_width, context->last_width + width))
 		{
-			if (context->bitcount < sizeof(context->buffer))
+			if (context->bitcount < buffer_size)
 			{
-				context->buffer[context->bitcount] = context->last_width > width ? 1 : 0;
+				buffer[context->bitcount] = context->last_width > width ? 1 : 0;
 				context->bitcount++;
 			}
             else
@@ -224,7 +223,7 @@ bool analyze(struct analysis_context* context, char value, long width)
 }
 
 // if return value = true then *temp is temperature in tenth's of degrees. e.g. 21.5 degrees = 215.
-bool await_transmission(int channel, int gpio_port, int* temp)
+bool await_transmission(int gpio_port, char* buffer, int buffer_size, int* payload_size)
 {
     int f;
 	char value;
@@ -256,29 +255,32 @@ bool await_transmission(int channel, int gpio_port, int* temp)
 		{
 			diff = time_diff(&old_timestamp, &timestamp);
             
-			if (analyze(&analysis_context, value, diff))
+			if (analyze(&analysis_context, value, diff, buffer, buffer_size))
             {
+                ret = true;
+                *payload_size = analysis_context.bitcount;
+                break;
                 // we have a completed transmission.
-                if (analysis_context.bitcount == 36)
-                {
-                    if (channel == 2*analysis_context.buffer[10] + analysis_context.buffer[11])
-                    {
-                        *temp = 0;
-                        for (i = 12; i <= 23; i++)
-                        {
-                            *temp <<= 1;
-                            *temp += analysis_context.buffer[i];
-                        }
-                        if (analysis_context.buffer[12] == 1)
-                        {
-                            // negative value
-                            *temp |= 0xfffff000;
-                        }
-                        *temp -= 500; // offset from -50 degrees celcius
-                        ret = true;
-                        break;
-                    }
-                }
+                // if (analysis_context.bitcount == 36)
+                // {
+                //     if (channel == 2*analysis_context.buffer[10] + analysis_context.buffer[11])
+                //     {
+                //         *temp = 0;
+                //         for (i = 12; i <= 23; i++)
+                //         {
+                //             *temp <<= 1;
+                //             *temp += analysis_context.buffer[i];
+                //         }
+                //         if (analysis_context.buffer[12] == 1)
+                //         {
+                //             // negative value
+                //             *temp |= 0xfffff000;
+                //         }
+                //         *temp -= 500; // offset from -50 degrees celcius
+                //         ret = true;
+                //         break;
+                //     }
+                // }
 
             }
 		}
@@ -295,10 +297,19 @@ bool await_transmission(int channel, int gpio_port, int* temp)
     return ret;
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-    int temperature;
 	struct sigaction action;
+    char buffer[100];
+    int payload_size;
+    int port;
+    int i;
+
+    if (argc < 2 || sscanf(argv[1], "%d", &port) != 1)
+    {
+        fprintf(stderr, "Usage: readport portnumber\n");
+        exit(-1);
+    }
 
 	memset(&action, 0, sizeof(struct sigaction));
 	action.sa_handler = term;
@@ -307,10 +318,13 @@ int main(void)
 
     while (terminated == 0)
     {
-        if (await_transmission(1, 21, &temperature))
+        if (await_transmission(port, buffer, sizeof(buffer), &payload_size))
         {
-            printf("%ld %f\n", time(NULL), temperature/(double)10);
-            sleep(1);
+            printf("%ld ", time(NULL));
+            for (i = 0; i < payload_size; i++)
+                putchar(buffer[i] + '0');
+            putchar('\n');
+            //sleep(1);
         }
     }
 }
