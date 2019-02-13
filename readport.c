@@ -9,7 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
-#include <curl/curl.h>
+
 
 // resources
 // http://linux-sunxi.org/GPIO
