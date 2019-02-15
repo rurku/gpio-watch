@@ -324,6 +324,7 @@ int main(int argc, char** argv)
             for (i = 0; i < payload_size; i++)
                 putchar(buffer[i] + '0');
             putchar('\n');
+            fflush(stdout);
             //sleep(1);
         }
     }
