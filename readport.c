@@ -161,7 +161,7 @@ bool is_within_margin(long a, long b)
     // if shorter than 200 then return false because it's too short to reliably measure
     if (a < 1000 || b < 1000)
         return false;
-	return abs(a - b) / (double)a < 0.1;
+	return abs(a - b) / (double)a < 0.2;
 }
 
 bool analyze(struct analysis_context* context, char value, long width, char* buffer, int buffer_size)
