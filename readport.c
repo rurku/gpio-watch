@@ -27,7 +27,7 @@ void export(int port)
         exit(1);
     }
 	snprintf(buf, 10, "%d", port);
-	fputs("21", f);
+	fputs(buf, f);
 	fclose(f);
 }
 
@@ -42,7 +42,7 @@ void unexport(int port)
         exit(1);
     }
 	snprintf(buf, 10, "%d", port);
-	fputs("21", f);
+	fputs(buf, f);
 	fclose(f);
 }
 
