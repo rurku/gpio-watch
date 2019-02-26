@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 
 // resources
@@ -297,6 +298,32 @@ bool await_transmission(int gpio_port, char* buffer, int buffer_size, int* paylo
     return ret;
 }
 
+void raw_mode(int gpio_port)
+{
+    int f;
+    char value;
+    struct timespec timestamp;
+    int wait_result;
+
+    export(gpio_port);
+    set_direction(gpio_port, "in");
+    set_edge(gpio_port, "both");
+    f = open_port(gpio_port);
+    read(f, &value, 1);
+
+    while (terminated == 0 && (wait_result = wait_for_edge(f, 100, &value, &timestamp)) >= 0)
+    {
+        if (wait_result > 0)
+        {
+            printf("%ld.%09ld %c\n", timestamp.tv_sec, timestamp.tv_nsec, value);
+            fflush(stdout);
+        }
+    }
+
+    close(f);
+    unexport(gpio_port);
+}
+
 int main(int argc, char** argv)
 {
     struct sigaction action;
@@ -304,6 +331,7 @@ int main(int argc, char** argv)
     int payload_size;
     int port;
     int i;
+    bool raw = false;
 
     if (argc < 2 || sscanf(argv[1], "%d", &port) != 1)
     {
@@ -311,21 +339,37 @@ int main(int argc, char** argv)
         exit(-1);
     }
 
+    if (argc == 3)
+    {
+        if (strcmp(argv[2], "-raw") == 0)
+        {
+            raw = true;
+        }
+    }
+
     memset(&action, 0, sizeof(struct sigaction));
     action.sa_handler = term;
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGINT, &action, NULL);
 
-    while (terminated == 0)
+    if (raw)
     {
-        if (await_transmission(port, buffer, sizeof(buffer), &payload_size))
+        raw_mode(port);
+    }
+    else
+    {
+
+        while (terminated == 0)
         {
-            printf("%ld ", time(NULL));
-            for (i = 0; i < payload_size; i++)
-                putchar(buffer[i] + '0');
-            putchar('\n');
-            fflush(stdout);
-            //sleep(1);
+            if (await_transmission(port, buffer, sizeof(buffer), &payload_size))
+            {
+                printf("%ld ", time(NULL));
+                for (i = 0; i < payload_size; i++)
+                    putchar(buffer[i] + '0');
+                putchar('\n');
+                fflush(stdout);
+                //sleep(1);
+            }
         }
     }
 }
