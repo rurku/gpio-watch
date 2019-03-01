@@ -137,7 +137,7 @@ void write_edges(int gpio_port, FILE* output_stream)
         }
         else
         {
-            fputs(output_stream, "\n");
+            fputs("\n", output_stream);
         }
     }
 
