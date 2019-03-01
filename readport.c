@@ -128,12 +128,16 @@ void write_edges(int gpio_port, FILE* output_stream)
     f = open_port(gpio_port);
     read(f, &value, 1);
 
-    while (terminated == 0 && (wait_result = wait_for_edge(f, 100, &value, &timestamp)) >= 0)
+    while (terminated == 0 && (wait_result = wait_for_edge(f, 1000, &value, &timestamp)) >= 0)
     {
         if (wait_result > 0)
         {
             fprintf(output_stream, "%ld %ld.%09ld %c\n", time(NULL), timestamp.tv_sec, timestamp.tv_nsec, value);
             fflush(output_stream);
+        }
+        else
+        {
+            fputs(output_stream, "\n");
         }
     }
 
