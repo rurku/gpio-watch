@@ -37,6 +37,8 @@ Output example
 1551216208 3237.566919293 0
 ```
 
+If there is no activity on the port then it will output an empty line every second. This can be used by a consumer program to detect when a transmission has stopped.
+
 ## Limitations
 * It runs in userspace, so it's at scheduler's mercy. Because of that, the reported time of edge occurrence may not be accurate, especially when the system is under load.
 This can make it unsuitable for decoding high frequency signals.
