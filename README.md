@@ -1,3 +1,12 @@
+# This repo is obsolete
+If you somehow stumbled upon this repo, don't use it.
+After I wrote this I learned that I was doing it wrong. The sysfs GPIO interface is deprecated and the new way is using gpio character devices.
+
+There is a library and a set of tools that make interacting with GPIO ports easy: `libgpiod` https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/about/
+
+What my tool does can be achieved with `gpiomon` and it will work better.
+
+
 # gpio-watch
 
 Linux command line program that watches a GPIO port and outputs timestamp and value when the state changes.
