@@ -13,6 +13,7 @@ Compile
 $ make
 ```
 Run
+
 In this example it will watch port 13. See http://linux-sunxi.org/GPIO on how to determine the port number in boards based on Allwinner processors
 ```
 $ sudo bin/gpio-watch -p 13
@@ -28,7 +29,6 @@ Output example
     |          |
     |          |          +>  New value of the GPIO port
     +          +          +
-1551216208 3237.564950459 1
 1551216208 3237.564950459 1
 1551216208 3237.565285251 0
 1551216208 3237.565700084 1
