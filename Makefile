@@ -1,3 +1,3 @@
-bin/readport: readport.c
+bin/gpio-watch: gpio-watch.c
 	mkdir -p bin
-	cc -o bin/readport readport.c
+	cc -o bin/gpio-watch gpio-watch.c
